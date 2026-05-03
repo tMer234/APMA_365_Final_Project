@@ -6,3 +6,4 @@ yfinance
 jupyter
 wrds
 pytest
+python-dotenv

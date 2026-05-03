@@ -54,10 +54,7 @@ from typing import Iterable, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-# ``wrds`` is an optional runtime dependency: validation, cleaning, and
-# math helpers are usable without it (and without a database connection),
-# which keeps unit tests cheap. Connection helpers will raise a clear
-# error if the package is missing.
+
 try:  # pragma: no cover - exercised only when wrds is installed
     import wrds  # type: ignore
 except Exception:  # pragma: no cover
@@ -69,7 +66,7 @@ except Exception:  # pragma: no cover
 # Override via keyword arguments to load_* functions if your WRDS schema
 # differs. These are documented defaults, not guarantees.
 # ---------------------------------------------------------------------------
-DEFAULT_SCHEMA: str = "optionm"
+DEFAULT_SCHEMA: str = "omtrial"
 DEFAULT_OPTION_PRICE_TABLE_FMT: str = "opprcd{year}"  # yearly partition
 DEFAULT_SECURITY_NAME_TABLE: str = "secnmd"
 DEFAULT_SECURITY_PRICE_TABLE: str = "secprd"
@@ -111,28 +108,7 @@ _TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 # Connection management
 # ---------------------------------------------------------------------------
 def connect_wrds(username: str | None = None, **kwargs):
-    """Open a WRDS connection.
 
-    Parameters
-    ----------
-    username:
-        WRDS username. If ``None``, falls back to the ``WRDS_USERNAME``
-        environment variable, then to the ``wrds`` library's own
-        resolution (``~/.pgpass`` / interactive prompt).
-    **kwargs:
-        Forwarded to :class:`wrds.Connection` (e.g. ``autoconnect``).
-
-    Returns
-    -------
-    wrds.Connection
-        A live connection object. Caller is responsible for closing it
-        via :func:`close_wrds`.
-
-    Raises
-    ------
-    ImportError
-        If the ``wrds`` package is not installed.
-    """
     if wrds is None:
         raise ImportError(
             "The 'wrds' package is required for connect_wrds(). "
@@ -242,9 +218,9 @@ def get_security_ids(
     """Look up OptionMetrics ``secid`` values for a list of tickers.
 
     Returns a :class:`pandas.DataFrame` with columns
-    ``[secid, ticker, issuer, effect_date, exp_date]`` (when present in
-    the underlying table). If ``start_date`` / ``end_date`` are given,
-    rows are filtered to security-name records overlapping that window.
+    ``[secid, ticker, issuer, effect_date]`` from the security name
+    table. If ``start_date`` / ``end_date`` are given, rows are filtered
+    to security-name records overlapping that window.
 
     Notes
     -----
@@ -254,11 +230,11 @@ def get_security_ids(
     """
     tickers = validate_tickers(tickers)
     qtable = _qualified(schema, table)
-    sql = f"SELECT secid, ticker, issuer, effect_date, exp_date FROM {qtable} WHERE ticker IN %(tickers)s"
+    sql = f"SELECT secid, ticker, issuer, effect_date FROM {qtable} WHERE ticker IN %(tickers)s"
     params: dict[str, object] = {"tickers": tuple(tickers)}
     if start_date is not None and end_date is not None:
         start, end = validate_date_range(start_date, end_date)
-        sql += " AND (exp_date IS NULL OR exp_date >= %(start)s) AND effect_date <= %(end)s"
+        sql += " AND effect_date <= %(end)s"
         params["start"] = start
         params["end"] = end
     sql += " ORDER BY ticker, effect_date"

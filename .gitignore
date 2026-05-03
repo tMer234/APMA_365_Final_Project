@@ -27,3 +27,4 @@ figures/*.pdf
 .vscode/
 .idea/
 *.swp
+.env
