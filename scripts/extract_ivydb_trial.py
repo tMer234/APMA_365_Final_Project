@@ -4,33 +4,12 @@ The IvyDB US Trial subscription on WRDS is restricted to Apple Inc. (ticker
 AAPL) and to the calendar window from 2014-03-01 through 2014-03-15
 inclusive. This script connects to WRDS via the existing
 :mod:`optionmetrics` helpers, pulls the option chain, the underlying daily
-prices, and (when available) the zero-coupon yield curve, derives the
-columns needed for downstream Black-Scholes analysis, applies conservative
-quote cleaning, and writes a single tidy CSV to
-``data/processed/aapl_ivydb_trial_2014-03-01_2014-03-15.csv``.
+prices, historical volatility data, and (when available) the zero-coupon 
+yield curve, derives the columns needed for downstream Black-Scholes analysis, 
+applies conservative quote cleaning, and writes tidy CSVs to:
+- ``data/processed/aapl_ivydb_trial_2014-03-01_2014-03-15.csv`` (main option data)
+- ``data/processed/aapl_historical_volatility_2014-03-01_2014-03-15.csv`` (historical vol)
 
-Authentication
---------------
-This script never reads credentials from environment variables or the
-command line. Configure WRDS via ``~/.pgpass`` or supply a username via
-``WRDS_USERNAME`` and let the ``wrds`` package prompt interactively. See
-``optionmetrics.connect_wrds`` for details.
-
-Caveats specific to the trial range
------------------------------------
-* The trial window is only ~11 calendar days. There is **not** enough data
-  in the trial alone to compute a meaningful historical-volatility lookback
-  (e.g. 30/60/90 calendar days). The script does not invent prior data; if
-  the user has access to a longer ``omtrial.secprd`` window, the
-  ``--underlying-start`` flag can extend the underlying-price pull only.
-* The risk-free / zero-curve table (``omtrial.zerocd``) may or may not be
-  exposed to a given trial account. The script tries to load it and writes
-  a separate ``aapl_ivydb_trial_zero_curve_*.csv`` if it succeeds; if the
-  table is unavailable the script logs a clear message and continues
-  without silently fabricating rates.
-* OptionMetrics stores ``strike_price`` as ``strike * 1000``. The
-  ``load_option_chain`` helper already rescales to dollars; the merged
-  output therefore reports strikes in dollars.
 
 Usage
 -----
@@ -51,6 +30,9 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Make the repo root importable so ``import optionmetrics`` works whether
 # the script is run as ``python scripts/extract_ivydb_trial.py`` or via
@@ -249,6 +231,88 @@ def _try_load_option_chain(
         )
 
 
+def _load_historical_volatility(
+    conn,
+    ticker: str,
+    start: str,
+    end: str,
+    schema: str,
+) -> pd.DataFrame | None:
+    """Load historical volatility data from OptionMetrics.
+    
+    For the trial account, historical volatility data is available in the 
+    'hvold2014' table with columns: secid, date, days, volatility.
+    """
+    try:
+        # Get security ID first
+        ids = om.get_security_ids(conn, [ticker], schema=schema)
+        if len(ids) == 0:
+            logger.warning("No security ID found for ticker %s", ticker)
+            return None
+            
+        secid = ids.iloc[0]['secid']
+        
+        # Try the year-specific table first (hvold2014 for 2014 data)
+        year = start[:4]  # Extract year from start date
+        hv_table = f"hvold{year}"
+        
+        hv_query = f"""
+        SELECT date, secid, days, volatility
+        FROM {schema}.{hv_table}
+        WHERE secid = %(secid)s 
+          AND date >= %(start_date)s 
+          AND date <= %(end_date)s
+        ORDER BY date, days
+        """
+        
+        hv_data = conn.raw_sql(hv_query, params={
+            'secid': int(secid),  # Convert numpy float to int
+            'start_date': start,
+            'end_date': end
+        })
+        
+        if len(hv_data) > 0:
+            # Add ticker for easier merging
+            hv_data['ticker'] = ticker
+            logger.info("Loaded %d historical volatility records from %s", len(hv_data), hv_table)
+            return hv_data
+        else:
+            logger.info("No historical volatility data found in %s for the trial range", hv_table)
+            return None
+        
+    except Exception as exc:
+        # Try the generic historical_volatility table as fallback
+        try:
+            logger.info("Trying fallback historical_volatility table...")
+            hv_query = f"""
+            SELECT date, securityid as secid, days, volatility
+            FROM {schema}.historical_volatility 
+            WHERE securityid = %(secid)s 
+              AND date >= %(start_date)s 
+              AND date <= %(end_date)s
+            ORDER BY date, days
+            """
+            
+            hv_data = conn.raw_sql(hv_query, params={
+                'secid': int(secid),  # Convert numpy float to int
+                'start_date': start,
+                'end_date': end
+            })
+            
+            if len(hv_data) > 0:
+                hv_data['ticker'] = ticker
+                logger.info("Loaded %d historical volatility records from historical_volatility table", len(hv_data))
+                return hv_data
+            
+        except Exception as exc2:
+            logger.warning(
+                "Historical volatility data unavailable in schema %s: %s (fallback also failed: %s)", 
+                schema, exc, exc2
+            )
+        
+        return None
+
+
 def run_extraction(
     output_path: Path,
     *,
@@ -260,6 +324,7 @@ def run_extraction(
     max_spread_pct: float | None = None,
     schema: str = om.DEFAULT_SCHEMA,
     zero_curve_output: Path | None = DEFAULT_ZERO_CURVE_OUTPUT_PATH,
+    include_historical_volatility: bool = True,
 ) -> pd.DataFrame:
     """Connect to WRDS, pull the trial data, write the CSV, and return it.
 
@@ -323,6 +388,21 @@ def run_extraction(
                     "from the analysis layer.",
                     exc,
                 )
+
+        # Try to load historical volatility data if requested
+        if include_historical_volatility:
+            logger.info("Loading %s historical volatility %s .. %s", ticker, start, end)
+            hv_data = _load_historical_volatility(conn, ticker, start, end, schema)
+            if hv_data is not None and len(hv_data) > 0:
+                # Write historical volatility to a separate CSV
+                hv_output = output_path.parent / f"{ticker.lower()}_historical_volatility_{start}_{end}.csv"
+                hv_data.to_csv(hv_output, index=False)
+                logger.info(
+                    "Historical volatility rows: %d → %s", len(hv_data), hv_output
+                )
+            else:
+                logger.info("No historical volatility data available for the trial range")
+
     finally:
         om.close_wrds(conn)
 
@@ -368,6 +448,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip the zero-curve query entirely.",
     )
     p.add_argument(
+        "--no-historical-volatility", action="store_true",
+        help="Skip the historical volatility query.",
+    )
+    p.add_argument(
         "--log-level", default="INFO",
         help="Python logging level (DEBUG, INFO, WARNING, ERROR).",
     )
@@ -395,6 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         max_spread_pct=args.max_spread_pct,
         schema=args.schema,
         zero_curve_output=None if args.no_zero_curve else DEFAULT_ZERO_CURVE_OUTPUT_PATH,
+        include_historical_volatility=not args.no_historical_volatility,
     )
     return 0
 
