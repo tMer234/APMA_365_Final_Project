@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from black_scholes import black_scholes_call, black_scholes_put
+from black_scholes import black_scholes_call, black_scholes_put, black_scholes_implied_volatility
 
 def main():
     # Test parameters
@@ -24,7 +24,10 @@ def main():
     print("-" * 35)
     print(f"Call Option Price:   ${call_price:.2f}")
     print(f"Put Option Price:    ${put_price:.2f}")
-    print("\n✓ All imports and functions working correctly!")
+
+    implied_volatility = black_scholes_implied_volatility(call_price, S, K, T, r, 'call')
+    print(f"Implied Volatility:   {implied_volatility*100}%")
+
 
 if __name__ == "__main__":
     main()
