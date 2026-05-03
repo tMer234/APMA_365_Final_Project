@@ -56,6 +56,56 @@ OptionMetrics WRDS schema/table names (`optionm.opprcd<YYYY>`,
 subscription; pass the `schema=` / `table=` keyword arguments on the
 `load_*` functions to override the defaults.
 
+## IvyDB US Trial extraction (AAPL, 2014-03-01 .. 2014-03-15)
+
+`scripts/extract_ivydb_trial.py` is a reproducible end-to-end pull of the
+IvyDB US **Trial** subscription: AAPL only, calendar window
+`2014-03-01` through `2014-03-15` inclusive (the trial does not contain
+any other ticker or date). Configure WRDS as above, then run:
+
+```bash
+python scripts/extract_ivydb_trial.py
+```
+
+Output is written to
+`data/processed/aapl_ivydb_trial_2014-03-01_2014-03-15.csv` and contains
+the cleaned option chain merged with daily underlying close prices and
+the columns required for Black-Scholes empirical analysis:
+
+* identifiers: `secid`, `ticker`, `optionid`, `cp_flag`
+* dates: `date`, `exdate`, `days_to_expiry`, `time_to_maturity_years`
+* quotes: `best_bid`, `best_offer`, `midpoint`, `bid_ask_spread`,
+  `bid_ask_spread_pct`, `volume`, `open_interest`
+* contract / underlying: `strike_price` (in dollars; OptionMetrics'
+  ×1000 integer scaling is undone by `optionmetrics.load_option_chain`),
+  `spot`, `moneyness` (S/K), `log_moneyness`
+* OptionMetrics analytics if exposed by the trial schema:
+  `implied_volatility`, `delta`, `gamma`, `vega`, `theta`
+
+If the trial schema does not expose Greeks, the script automatically
+retries with a Greek-free projection.
+
+Useful flags:
+
+```bash
+python scripts/extract_ivydb_trial.py \
+    --max-spread-pct 1.0 \
+    --min-volume 0 \
+    --output data/processed/aapl_trial.csv
+```
+
+Caveats specific to the trial range:
+
+* The 11-calendar-day window is not enough to compute a meaningful
+  historical-volatility lookback. Pass `--underlying-start` if you have
+  access to a longer `omtrial.secprd` range; otherwise use a fallback
+  source (e.g. yfinance) from the analysis layer.
+* The risk-free zero-coupon curve (`omtrial.zerocd`) may not be exposed
+  in every trial account. The script tries it and writes
+  `data/processed/aapl_ivydb_trial_zero_curve_*.csv` on success;
+  otherwise it logs a clear `TODO` and continues without fabricating
+  rates.
+
 ## Report
 
 See `report/` (LaTeX, generated separately on Overleaf).
