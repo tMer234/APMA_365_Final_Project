@@ -4,3 +4,5 @@ pandas
 matplotlib
 yfinance
 jupyter
+wrds
+pytest
