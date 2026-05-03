@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+*.egg-info/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data (large/regenerable)
+data/*.csv
+data/*.parquet
+!data/.gitkeep
+
+# Figures (regenerable)
+figures/*.png
+figures/*.pdf
+!figures/.gitkeep
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
