@@ -112,6 +112,21 @@ def _bs_price(row: pd.Series, r: float) -> float:
     return np.nan
 
 
+def _mae_rmse_mape_signed_error(error: np.ndarray, denom: np.ndarray) -> tuple[float, float, float]:
+    """MAE, RMSE, MAPE for signed error; MAPE uses |error|/denom where denom > 0."""
+    err = np.asarray(error, dtype=float)
+    d = np.asarray(denom, dtype=float)
+    mask = np.isfinite(err) & np.isfinite(d) & (d > 0)
+    if not np.any(mask):
+        return float("nan"), float("nan"), float("nan")
+    e = err[mask]
+    de = d[mask]
+    mae = float(np.mean(np.abs(e)))
+    rmse = float(np.sqrt(np.mean(e**2)))
+    mape = float(np.mean(np.abs(e) / de))
+    return mae, rmse, mape
+
+
 def _nr_iv(row: pd.Series, r: float) -> float:
     cp = "call" if row["cp_flag"] == "C" else "put"
     try:
@@ -180,24 +195,38 @@ def run_backtest(
     valid["iv_error_vs_hv"] = valid["nr_implied_vol"] - valid["historical_volatility"]
     valid["abs_iv_error_vs_hv"] = valid["iv_error_vs_hv"].abs()
 
+    bs_mae, bs_rmse, bs_mape = _mae_rmse_mape_signed_error(
+        (valid["bs_price_hv"] - valid["midpoint"]).to_numpy(),
+        valid["midpoint"].to_numpy(),
+    )
+    nr_mask = valid["nr_implied_vol"].notna() & (valid["historical_volatility"] > 0)
+    nr_iv_err = (valid.loc[nr_mask, "nr_implied_vol"] - valid.loc[nr_mask, "historical_volatility"]).to_numpy()
+    nr_hv = valid.loc[nr_mask, "historical_volatility"].to_numpy()
+    nr_mae, nr_rmse, nr_mape = _mae_rmse_mape_signed_error(nr_iv_err, nr_hv)
+    n_nr_iv = int(nr_mask.sum())
+
     summary = pd.DataFrame(
         {
             "metric": [
                 "n_quotes",
-                "bs_mae",
-                "bs_rmse",
-                "bs_mape",
-                "iv_mae_vs_hv",
-                "iv_rmse_vs_hv",
+                "n_nr_iv",
+                "bs_price_mae",
+                "bs_price_rmse",
+                "bs_price_mape",
+                "nr_iv_mae",
+                "nr_iv_rmse",
+                "nr_iv_mape",
                 "median_tenor_gap_days",
             ],
             "value": [
                 float(len(valid)),
-                float(valid["abs_bs_error"].mean()),
-                float(np.sqrt((valid["bs_error"] ** 2).mean())),
-                float(valid["ape_bs"].mean()),
-                float(valid["abs_iv_error_vs_hv"].mean()),
-                float(np.sqrt((valid["iv_error_vs_hv"] ** 2).mean())),
+                float(n_nr_iv),
+                bs_mae,
+                bs_rmse,
+                bs_mape,
+                nr_mae,
+                nr_rmse,
+                nr_mape,
                 float(valid["tenor_gap_days"].median()),
             ],
         }

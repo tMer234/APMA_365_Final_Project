@@ -1,0 +1,15 @@
+Backtest summary metrics
+========================================
+n_quotes                     10615
+n_nr_iv                      101
+bs_price_mae                 2.95509
+bs_price_rmse                4.9559
+bs_price_mape                0.283867
+nr_iv_mae                    0.0975045
+nr_iv_rmse                   0.156217
+nr_iv_mape                   0.422012
+median_tenor_gap_days        11
+
+Notes:
+  bs_price_* : Black-Scholes price (historical vol) vs midpoint
+  nr_iv_*    : Newton-Raphson IV vs historical IV (finite NR only)

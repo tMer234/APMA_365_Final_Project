@@ -51,6 +51,28 @@ DEFAULT_SUMMARY_PATH = (
 DEFAULT_OUTPUT_DIR = _REPO_ROOT / "figures" / "model_comparison"
 
 
+def generate_model_comparison_figures(
+    backtest_df: pd.DataFrame,
+    output_dir: Path,
+    *,
+    show: bool = False,
+) -> None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    plot_bs_predicted_vs_actual(
+        backtest_df, save_path=output_dir / "bs_predicted_vs_actual.png", show=show
+    )
+    plot_nr_iv_vs_historical_by_horizon(
+        backtest_df, save_path=output_dir / "nr_iv_vs_historical_by_horizon.png", show=show
+    )
+    plot_bs_error_diagnostics(backtest_df, prefix=output_dir / "bs_error", show=show)
+    plot_iv_error_diagnostics(backtest_df, prefix=output_dir / "iv_error", show=show)
+    plot_r2_by_volatility_range(
+        backtest_df,
+        save_path=output_dir / "r2_by_volatility_range_calls_puts.png",
+        show=show,
+    )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--options", type=Path, default=DEFAULT_OPTIONS_PATH)
@@ -94,19 +116,7 @@ def main(argv: list[str] | None = None) -> int:
             min_midpoint=args.min_midpoint,
         )
 
-    plot_bs_predicted_vs_actual(
-        backtest, save_path=args.output_dir / "bs_predicted_vs_actual.png", show=args.show
-    )
-    plot_nr_iv_vs_historical_by_horizon(
-        backtest, save_path=args.output_dir / "nr_iv_vs_historical_by_horizon.png", show=args.show
-    )
-    plot_bs_error_diagnostics(backtest, prefix=args.output_dir / "bs_error", show=args.show)
-    plot_iv_error_diagnostics(backtest, prefix=args.output_dir / "iv_error", show=args.show)
-    plot_r2_by_volatility_range(
-        backtest,
-        save_path=args.output_dir / "r2_by_volatility_range_calls_puts.png",
-        show=args.show,
-    )
+    generate_model_comparison_figures(backtest, args.output_dir, show=args.show)
 
     print(f"Generated focused model-comparison plots in: {args.output_dir}")
     return 0
