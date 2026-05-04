@@ -89,8 +89,8 @@ python scripts/generate_model_comparison_plots.py \
 
 Generates figures in `figures/model_comparison/`, including:
 
-- BS predicted vs actual midpoint (with linear fit, `R²`, adjusted `R²`)
-- NR implied volatility vs historical volatility by horizon
+- Black Scholes predicted vs actual midpoint (with linear fit, `R²`, adjusted `R²`)
+- Newton-Raphson derived implied volatility vs historical volatility by horizon
 - BS and NR error diagnostics
 - `R²` and adjusted `R²` by volatility range, split by calls vs puts
 
