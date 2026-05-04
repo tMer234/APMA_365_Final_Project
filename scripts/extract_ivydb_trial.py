@@ -1,24 +1,4 @@
-"""Extract OptionMetrics IvyDB US Trial data for AAPL (2014-03-01 .. 2014-03-15).
-
-The IvyDB US Trial subscription on WRDS is restricted to Apple Inc. (ticker
-AAPL) and to the calendar window from 2014-03-01 through 2014-03-15
-inclusive. This script connects to WRDS via the existing
-:mod:`optionmetrics` helpers, pulls the option chain, the underlying daily
-prices, historical volatility data, and (when available) the zero-coupon 
-yield curve, derives the columns needed for downstream Black-Scholes analysis, 
-applies conservative quote cleaning, and writes tidy CSVs to:
-- ``data/processed/aapl_ivydb_trial_2014-03-01_2014-03-15.csv`` (main option data)
-- ``data/processed/aapl_historical_volatility_2014-03-01_2014-03-15.csv`` (historical vol)
-
-
-Usage
------
-::
-
-    python scripts/extract_ivydb_trial.py
-    python scripts/extract_ivydb_trial.py --output data/processed/custom.csv
-    python scripts/extract_ivydb_trial.py --max-spread-pct 1.0 --min-volume 0
-"""
+"""Extract AAPL IvyDB trial data and write processed CSV outputs."""
 
 from __future__ import annotations
 
@@ -34,9 +14,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Make the repo root importable so ``import optionmetrics`` works whether
-# the script is run as ``python scripts/extract_ivydb_trial.py`` or via
-# ``python -m scripts.extract_ivydb_trial``.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
@@ -44,9 +21,6 @@ if str(_REPO_ROOT) not in sys.path:
 import optionmetrics as om  # noqa: E402
 
 
-# ---------------------------------------------------------------------------
-# Trial-data constants
-# ---------------------------------------------------------------------------
 TRIAL_TICKER: str = "AAPL"
 TRIAL_START_DATE: str = "2014-03-01"
 TRIAL_END_DATE: str = "2014-03-15"
@@ -64,10 +38,6 @@ DEFAULT_ZERO_CURVE_OUTPUT_PATH: Path = (
     / "aapl_ivydb_trial_zero_curve_2014-03-01_2014-03-15.csv"
 )
 
-# Columns we ask the option-price table for. The trial table does not
-# guarantee Greeks, but we request them so they survive into the output if
-# present. Anything the helper rejects will surface as a clear SQL error,
-# at which point the caller can prune via --option-columns.
 TRIAL_OPTION_COLUMNS: tuple[str, ...] = (
     "secid",
     "date",
@@ -86,7 +56,6 @@ TRIAL_OPTION_COLUMNS: tuple[str, ...] = (
     "optionid",
 )
 
-# Fallback projection if Greeks are not exposed in the trial schema.
 TRIAL_OPTION_COLUMNS_NO_GREEKS: tuple[str, ...] = (
     "secid",
     "date",
@@ -104,9 +73,6 @@ TRIAL_OPTION_COLUMNS_NO_GREEKS: tuple[str, ...] = (
 logger = logging.getLogger("extract_ivydb_trial")
 
 
-# ---------------------------------------------------------------------------
-# Output path helpers
-# ---------------------------------------------------------------------------
 def default_output_path(
     ticker: str = TRIAL_TICKER,
     start: str = TRIAL_START_DATE,
@@ -114,34 +80,16 @@ def default_output_path(
     *,
     base_dir: Path | None = None,
 ) -> Path:
-    """Build the canonical output CSV path for a trial extraction.
-
-    Pure helper so tests can verify the naming scheme without touching
-    WRDS or the filesystem.
-    """
+    """Return canonical output CSV path."""
     base = base_dir if base_dir is not None else _REPO_ROOT / "data" / "processed"
     return base / f"{ticker.lower()}_ivydb_trial_{start}_{end}.csv"
 
 
-# ---------------------------------------------------------------------------
-# Cleaning / feature engineering (DB-free, unit-testable)
-# ---------------------------------------------------------------------------
 def add_derived_columns(
     options: pd.DataFrame,
     underlying: pd.DataFrame | None,
 ) -> pd.DataFrame:
-    """Merge spot prices and add derived analytic columns.
-
-    Adds ``midpoint`` (if not already present from cleaning), ``spot``
-    (close from the underlying daily price table joined on
-    ``secid+date``), ``bid_ask_spread``, ``bid_ask_spread_pct``,
-    ``days_to_expiry``, ``time_to_maturity_years``, ``moneyness`` (S/K)
-    and ``log_moneyness``. Idempotent — if a derived column is already
-    present and finite, it is overwritten with the freshly-computed
-    value.
-
-    Returns a new DataFrame; the input is not mutated.
-    """
+    """Merge spot and add derived columns used downstream."""
     if options is None or len(options) == 0:
         return pd.DataFrame() if options is None else options.copy()
 
@@ -170,8 +118,6 @@ def add_derived_columns(
         u = underlying[["secid", "date", "close"]].copy()
         u["date"] = pd.to_datetime(u["date"])
         u = u.rename(columns={"close": "spot"})
-        # If multiple rows per (secid, date), take the last — defensive
-        # for noisy trial data.
         u = u.drop_duplicates(subset=["secid", "date"], keep="last")
         out = out.merge(u, on=["secid", "date"], how="left")
 
@@ -188,9 +134,6 @@ def add_derived_columns(
     return out
 
 
-# ---------------------------------------------------------------------------
-# Live extraction
-# ---------------------------------------------------------------------------
 def _try_load_option_chain(
     conn,
     *,
@@ -238,13 +181,8 @@ def _load_historical_volatility(
     end: str,
     schema: str,
 ) -> pd.DataFrame | None:
-    """Load historical volatility data from OptionMetrics.
-    
-    For the trial account, historical volatility data is available in the 
-    'hvold2014' table with columns: secid, date, days, volatility.
-    """
+    """Load historical volatility data from OptionMetrics."""
     try:
-        # Get security ID first
         ids = om.get_security_ids(conn, [ticker], schema=schema)
         if len(ids) == 0:
             logger.warning("No security ID found for ticker %s", ticker)
@@ -252,8 +190,7 @@ def _load_historical_volatility(
             
         secid = ids.iloc[0]['secid']
         
-        # Try the year-specific table first (hvold2014 for 2014 data)
-        year = start[:4]  # Extract year from start date
+        year = start[:4]
         hv_table = f"hvold{year}"
         
         hv_query = f"""
@@ -266,13 +203,12 @@ def _load_historical_volatility(
         """
         
         hv_data = conn.raw_sql(hv_query, params={
-            'secid': int(secid),  # Convert numpy float to int
+            'secid': int(secid),
             'start_date': start,
             'end_date': end
         })
         
         if len(hv_data) > 0:
-            # Add ticker for easier merging
             hv_data['ticker'] = ticker
             logger.info("Loaded %d historical volatility records from %s", len(hv_data), hv_table)
             return hv_data
@@ -281,7 +217,6 @@ def _load_historical_volatility(
             return None
         
     except Exception as exc:
-        # Try the generic historical_volatility table as fallback
         try:
             logger.info("Trying fallback historical_volatility table...")
             hv_query = f"""
@@ -294,7 +229,7 @@ def _load_historical_volatility(
             """
             
             hv_data = conn.raw_sql(hv_query, params={
-                'secid': int(secid),  # Convert numpy float to int
+                'secid': int(secid),
                 'start_date': start,
                 'end_date': end
             })
@@ -326,14 +261,7 @@ def run_extraction(
     zero_curve_output: Path | None = DEFAULT_ZERO_CURVE_OUTPUT_PATH,
     include_historical_volatility: bool = True,
 ) -> pd.DataFrame:
-    """Connect to WRDS, pull the trial data, write the CSV, and return it.
-
-    ``underlying_start`` lets callers extend the spot-price lookback
-    independently of the option-chain window — useful if the trial has
-    extra prior daily prices, or to clearly confirm that it does not.
-
-    Returns the merged option-level DataFrame that was written.
-    """
+    """Pull trial data from WRDS and write processed CSV output."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.info("Connecting to WRDS (schema=%s) …", schema)
@@ -363,8 +291,6 @@ def run_extraction(
         )
         logger.info("Underlying rows: %d", len(underlying))
 
-        # Try the zero curve. The trial may not expose this; we degrade
-        # to a clear log line rather than fabricating rates.
         if zero_curve_output is not None:
             try:
                 zc = om.load_zero_curve_or_rates(conn, start, end, schema=schema)
@@ -389,12 +315,10 @@ def run_extraction(
                     exc,
                 )
 
-        # Try to load historical volatility data if requested
         if include_historical_volatility:
             logger.info("Loading %s historical volatility %s .. %s", ticker, start, end)
             hv_data = _load_historical_volatility(conn, ticker, start, end, schema)
             if hv_data is not None and len(hv_data) > 0:
-                # Write historical volatility to a separate CSV
                 hv_output = output_path.parent / f"{ticker.lower()}_historical_volatility_{start}_{end}.csv"
                 hv_data.to_csv(hv_output, index=False)
                 logger.info(
@@ -412,9 +336,6 @@ def run_extraction(
     return merged
 
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument(

@@ -1,0 +1,8 @@
+metric,value
+n_quotes,10615.0
+bs_mae,2.955086451776955
+bs_rmse,4.955902344350691
+bs_mape,0.2838665161906518
+iv_mae_vs_hv,0.09750447795455533
+iv_rmse_vs_hv,0.15621654700513254
+median_tenor_gap_days,11.0

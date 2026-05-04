@@ -28,3 +28,4 @@ figures/*.pdf
 .idea/
 *.swp
 .env
+.cache/
