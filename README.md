@@ -1,108 +1,177 @@
-# APMA 365 Final Project: Black-Scholes Validation
+# APMA 365 Final Project: Black-Scholes Validation (AAPL)
 
-This repository evaluates Black-Scholes option pricing on AAPL OptionMetrics trial data (`2014-03-01` to `2014-03-15`), including:
+Empirical comparison of **Black-Scholes** option prices and **Newton-Raphson implied volatility** to market data from the **OptionMetrics IvyDB US Trial**: Apple (**AAPL**) only, **2014-03-01** through **2014-03-15** (calendar dates fixed by the trial subscription).
 
-- Black-Scholes predicted price vs observed option midpoint
-- Newton-Raphson implied volatility vs historical volatility by tenor
-- error diagnostics and volatility-range fit metrics (`R²`, adjusted `R²`)
+The project:
 
-## Setup
+- Pulls and cleans option chains and historical volatility (optional WRDS step).
+- Prices options with Black-Scholes using **historical volatility** matched to the nearest OptionMetrics tenor by calendar day.
+- Solves for **implied volatility** with a **Newton-Raphson** root finder (European call/put formulas).
+- Reports **MAE**, **RMSE**, and **MAPE** for price errors (BS vs midpoint) and for IV errors (NR IV vs historical IV, where NR converges).
+- Produces **core** exploratory figures and **model-comparison** diagnostics (including `R²` by volatility bucket).
+
+---
+
+## Requirements
+
+- Python 3.10+ recommended  
+- Dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Key Files
+Packages: `numpy`, `scipy`, `pandas`, `matplotlib`, `wrds`, `pytest`, `python-dotenv`, plus `yfinance` / `jupyter` as listed.
 
-- `black_scholes.py` - call/put pricing, vega, implied-vol solver
-- `optionmetrics.py` - WRDS/OptionMetrics query helpers and cleaning utilities
-- `scripts/extract_ivydb_trial.py` - fetch and process AAPL trial dataset
-- `scripts/backtest_black_scholes.py` - compute backtest outputs and summary metrics
-- `scripts/plots.py` - reusable plotting utilities
-- `scripts/generate_core_plots.py` - generate general market/chain diagnostic plots
-- `scripts/generate_model_comparison_plots.py` - generate BS/NR comparison plots
-- `main.py` - full pipeline (optional WRDS extract, backtest, all figures, metrics text)
+---
 
-## Data Pipeline
+## Quick start (full pipeline)
 
-### 1) Extract trial data
-
-```bash
-python scripts/extract_ivydb_trial.py
-```
-
-Primary outputs:
-
-- `data/processed/aapl_ivydb_trial_2014-03-01_2014-03-15.csv`
-- `data/processed/aapl_historical_volatility_2014-03-01_2014-03-15.csv`
-
-### 2) Run everything (recommended)
+With processed CSVs already under `data/processed/`:
 
 ```bash
 python main.py --min-midpoint 0.25 --max-rows 100000000
 ```
 
-Optional WRDS pull first:
+To **refresh data from WRDS** first (requires `~/.pgpass` or interactive WRDS login and `WRDS_USERNAME` if you use it):
 
 ```bash
 python main.py --extract --min-midpoint 0.25 --max-rows 100000000
 ```
 
-Writes backtest CSVs, all figures under `figures/`, and a readable metrics file:
+This will:
 
-- `data/processed/analysis_metrics.txt`
+1. Optionally run extraction (`--extract`).
+2. Run the backtest and write CSVs.
+3. Regenerate **all** figures (core + `figures/model_comparison/`).
+4. Print metrics to stdout and write `data/processed/analysis_metrics.txt`.
 
-### 3) Run backtest only (optional)
+---
 
-```bash
-python scripts/backtest_black_scholes.py --min-volume 1 --min-midpoint 0.25 --max-rows 100000000
-```
+## `main.py` reference
 
-Outputs:
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--extract` | off | If set, runs WRDS extraction into `--options` path (and related trial outputs). |
+| `--options` | `data/processed/aapl_ivydb_trial_2014-03-01_2014-03-15.csv` | Processed option-chain CSV. |
+| `--historical-vol` | `data/processed/aapl_historical_volatility_2014-03-01_2014-03-15.csv` | Historical vol CSV. |
+| `--backtest-out` | `data/processed/aapl_bs_backtest_2014-03-01_2014-03-15.csv` | Per-contract backtest rows. |
+| `--summary-out` | `data/processed/aapl_bs_backtest_summary_2014-03-01_2014-03-15.csv` | One-row-per-metric summary. |
+| `--figures-dir` | `figures` | Root for PNGs; model plots go to `figures/model_comparison/`. |
+| `--metrics-out` | `data/processed/analysis_metrics.txt` | Human-readable metrics table. |
+| `--risk-free-rate` | `0.01` | Continuously compounded rate used in BS and NR. |
+| `--min-volume` | `1` | Drop option rows with volume below this before backtest. |
+| `--max-rows` | `100000000` | Cap rows after filters (after sorting by volume if capped). |
+| `--min-midpoint` | `0.25` | Exclude quotes with midpoint below this (filters illiquid / penny quotes). |
+| `--log-level` | `INFO` | Logging level when `--extract` is used. |
 
-- `data/processed/aapl_bs_backtest_2014-03-01_2014-03-15.csv`
-- `data/processed/aapl_bs_backtest_summary_2014-03-01_2014-03-15.csv` (includes `bs_price_mae` / `bs_price_rmse` / `bs_price_mape` and `nr_iv_mae` / `nr_iv_rmse` / `nr_iv_mape`)
+---
 
-## Plot Generation
+## Repository layout
 
-### General core plots (spot, volume/open interest, volatility structure, liquidity)
+| Path | Role |
+|------|------|
+| `main.py` | Single entrypoint: extract (optional), backtest, figures, metrics file. |
+| `black_scholes.py` | European call/put price, vega, and NR-style implied-vol solver. |
+| `optionmetrics.py` | WRDS connection helpers, validation, option chain / prices / zero-curve loaders, quote cleaning. |
+| `scripts/extract_ivydb_trial.py` | Trial-specific WRDS pull and CSV writes. |
+| `scripts/backtest_black_scholes.py` | Merge HV tenors, compute BS prices, NR IV, errors, summary metrics. |
+| `scripts/plots.py` | All matplotlib helpers (core + model comparison). |
+| `scripts/generate_core_plots.py` | CLI wrapper for core figures only. |
+| `scripts/generate_model_comparison_plots.py` | CLI wrapper for model figures; exposes `generate_model_comparison_figures()`. |
+| `tests/` | `pytest` tests for BS, OptionMetrics helpers, and extraction helpers. |
+| `data/processed/` | Processed CSVs and `analysis_metrics.txt` (large CSVs are gitignored by default). |
+| `figures/` | PNG outputs (often gitignored). |
 
-```bash
-python scripts/generate_core_plots.py
-```
+---
 
-Generates figures in `figures/`, including:
+## Data outputs
 
-- spot price over time
-- option activity over time (daily volume, open interest, quote count)
-- historical volatility time series and term structure
-- implied-volatility smile/term-structure
-- liquidity and price-by-strike views
+### Extraction (`scripts/extract_ivydb_trial.py` or `main.py --extract`)
 
-### Model-comparison plots (BS/NR + diagnostics)
+- **`aapl_ivydb_trial_2014-03-01_2014-03-15.csv`** — Option chain joined to underlying close as `spot`, plus midpoint, spreads, DTE, moneyness, and optional Greeks / OptionMetrics implied vol if the schema exposes them.
+- **`aapl_historical_volatility_2014-03-01_2014-03-15.csv`** — Columns include `date`, `days`, `volatility` (and identifiers as written by the script).
+- **`aapl_ivydb_trial_zero_curve_2014-03-01_2014-03-15.csv`** — Written only if the trial schema exposes the zero curve.
 
-```bash
-python scripts/generate_model_comparison_plots.py \
-  --min-midpoint 0.25 \
-  --max-rows 5000
-```
+### Backtest (`scripts/backtest_black_scholes.py` or `main.py`)
 
-Generates figures in `figures/model_comparison/`, including:
+**Option-level file** (`aapl_bs_backtest_*.csv`) — lean columns used for plots and metrics:
 
-- Black Scholes predicted vs actual midpoint (with linear fit, `R²`, adjusted `R²`)
-- Newton-Raphson derived implied volatility vs historical volatility by horizon
-- BS and NR error diagnostics
-- `R²` and adjusted `R²` by volatility range, split by calls vs puts
+`cp_flag`, `midpoint`, `strike_price`, `spot`, `time_to_maturity_years`, `hv_tenor_days`, `historical_volatility`, `tenor_gap_days`, `bs_price_hv`, `bs_error`, `nr_implied_vol`, `iv_error_vs_hv`
 
-MAE / RMSE / MAPE are **not** plotted; they appear in `analysis_metrics.txt` and the backtest summary CSV.
+**Summary file** (`aapl_bs_backtest_summary_*.csv`) — long format `metric`, `value`:
 
-## WRDS Notes
+| Metric | Meaning |
+|--------|---------|
+| `n_quotes` | Rows after filters. |
+| `n_nr_iv` | Rows with finite NR implied volatility (used for NR IV metrics). |
+| `bs_price_mae` | Mean absolute error, \(\|\hat{C}-P\|\) (BS price \(\hat{C}\) vs midpoint \(P\)). |
+| `bs_price_rmse` | RMSE of \((\hat{C}-P)\). |
+| `bs_price_mape` | Mean \(\|\hat{C}-P\|/P\) (relative to midpoint). |
+| `nr_iv_mae` | Mean \(\|\sigma_{NR}-\sigma_{HV}\|\) on rows with finite \(\sigma_{NR}\) and \(\sigma_{HV}>0\). |
+| `nr_iv_rmse` | RMSE of \((\sigma_{NR}-\sigma_{HV})\). |
+| `nr_iv_mape` | Mean \(\|\sigma_{NR}-\sigma_{HV}\|/\sigma_{HV}\). |
+| `median_tenor_gap_days` | Median \(\lvert \text{HV tenor days} - \text{DTE}\rvert\) for matched rows. |
 
-- Configure WRDS credentials outside the repo (e.g., `~/.pgpass`)
-- schema/table names vary by subscription; override via `schema=` / `table=` args in `optionmetrics.py` helpers
+**Text metrics** — `data/processed/analysis_metrics.txt` duplicates the summary in a fixed-width block for reports.
+
+MAE / RMSE / MAPE are **not** drawn as separate bar charts; use the summary CSV or `analysis_metrics.txt`.
+
+---
+
+## Figures
+
+### Core (`figures/`)
+
+Generated by `main.py` or `python scripts/generate_core_plots.py`:
+
+| File | Content |
+|------|---------|
+| `spot_over_time.png` | Mean `spot` by trade date. |
+| `option_activity_over_time.png` | Daily summed volume / open interest and quote count. |
+| `historical_volatility_30d.png` | 30-day historical vol time series. |
+| `price_vs_strike_calls.png` | Call midpoint vs strike on last date in sample; scatter colored by **days to expiry**; dashed **intrinsic** \((S-K)^+\). |
+| `price_vs_strike_puts.png` | Same for puts; intrinsic \((K-S)^+\). |
+
+### Model comparison (`figures/model_comparison/`)
+
+Generated by `main.py` or `python scripts/generate_model_comparison_plots.py`:
+
+| File | Content |
+|------|---------|
+| `bs_predicted_vs_actual.png` | BS price vs midpoint; calls vs puts; linear fit with \(R^2\) and adjusted \(R^2\). |
+| `nr_iv_vs_historical_by_horizon.png` | Median NR IV vs median historical IV by matched tenor bucket. |
+| `bs_error_hist.png` / `bs_error_vs_price.png` | BS price error distribution and vs midpoint. |
+| `iv_error_hist.png` / `iv_error_by_horizon.png` | **Absolute** NR IV minus historical IV (histogram and median by horizon). |
+| `r2_by_volatility_range_calls_puts.png` | \(R^2\) and adjusted \(R^2\) of BS price vs midpoint within historical-vol quantile bins, calls and puts. |
+
+---
+
+## WRDS and configuration
+
+- Install the **`wrds`** client and configure credentials (typically **`~/.pgpass`**). Do not commit secrets; optional **`WRDS_USERNAME`** is read by `optionmetrics.connect_wrds()`.
+- Default IvyDB trial schema is **`omtrial`** (see `optionmetrics.DEFAULT_SCHEMA`). Table names may differ by subscription; override via keyword arguments on the loaders in `optionmetrics.py` if needed.
+- Extraction uses **`python-dotenv`** so a local **`.env`** can hold non-secret paths or flags only if you choose (never commit real passwords).
+
+---
+
+## Caveats (read for interpretation)
+
+- **European** Black-Scholes vs **American**-style listed options: deep ITM early exercise can matter; this is a standard classroom-style benchmark, not a full American pricer.
+- **Risk-free rate** is a flat constant (default 1%); the trial may or may not expose a zero curve; extraction can write a zero-curve CSV when available.
+- **Historical volatility** is matched by **nearest tenor** to each option’s DTE on the same calendar date; `median_tenor_gap_days` summarizes mismatch.
+- **NR implied volatility** may fail to converge on many contracts (e.g. extreme moneyness or very short life); **`n_nr_iv`** can be much smaller than **`n_quotes`**. NR IV metrics are computed only on converged rows.
+
+---
 
 ## Tests
 
 ```bash
 pytest
 ```
+
+---
+
+## License / course use
+
+Use and adapt for APMA 365 reporting; cite OptionMetrics / WRDS and trial data restrictions where required by your institution.
