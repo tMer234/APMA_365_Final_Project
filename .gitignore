@@ -18,8 +18,6 @@ data/*.parquet
 !data/.gitkeep
 
 # Figures (regenerable)
-figures/*.png
-figures/*.pdf
 !figures/.gitkeep
 
 # OS / editor
