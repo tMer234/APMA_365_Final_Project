@@ -162,7 +162,3 @@ pytest
 ```
 
 ---
-
-## License / course use
-
-Use and adapt for APMA 365 reporting; cite OptionMetrics / WRDS and trial data restrictions where required by your institution.
