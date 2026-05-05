@@ -26,7 +26,7 @@ from scripts.plots import (  # noqa: E402
     plot_bs_error_diagnostics,
     plot_bs_predicted_vs_actual,
     plot_iv_error_diagnostics,
-    plot_nr_iv_vs_historical_by_horizon,
+    plot_nr_iv_vs_historical_by_hv_tenor,
     plot_r2_by_volatility_range,
 )
 
@@ -61,8 +61,8 @@ def generate_model_comparison_figures(
     plot_bs_predicted_vs_actual(
         backtest_df, save_path=output_dir / "bs_predicted_vs_actual.png", show=show
     )
-    plot_nr_iv_vs_historical_by_horizon(
-        backtest_df, save_path=output_dir / "nr_iv_vs_historical_by_horizon.png", show=show
+    plot_nr_iv_vs_historical_by_hv_tenor(
+        backtest_df, save_path=output_dir / "nr_iv_vs_historical_by_hv_tenor.png", show=show
     )
     plot_bs_error_diagnostics(backtest_df, prefix=output_dir / "bs_error", show=show)
     plot_iv_error_diagnostics(backtest_df, prefix=output_dir / "iv_error", show=show)

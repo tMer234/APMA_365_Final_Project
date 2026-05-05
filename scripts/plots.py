@@ -271,12 +271,6 @@ def plot_bs_predicted_vs_actual(
     ss_res = np.sum((y - y_hat) ** 2)
     ss_tot = np.sum((y - np.mean(y)) ** 2)
     r2 = 1.0 - (ss_res / ss_tot) if ss_tot > 0 else np.nan
-    n = len(x)
-    p = 1  # one regressor: actual midpoint
-    if n > p + 1 and not np.isnan(r2):
-        r2_adj = 1.0 - (1.0 - r2) * (n - 1.0) / (n - p - 1.0)
-    else:
-        r2_adj = np.nan
 
     line_x = np.array([mn, mx])
     line_y = intercept + slope * line_x
@@ -285,7 +279,7 @@ def plot_bs_predicted_vs_actual(
     ax.text(
         0.03,
         0.97,
-        f"R² = {r2:.4f}\nAdj. R² = {r2_adj:.4f}",
+        f"R² = {r2:.4f}",
         transform=ax.transAxes,
         verticalalignment="top",
         bbox={"facecolor": "white", "alpha": 0.9, "edgecolor": "#666666"},
@@ -298,13 +292,13 @@ def plot_bs_predicted_vs_actual(
     _finalize_plot(fig, save_path, show)
 
 
-def plot_nr_iv_vs_historical_by_horizon(
+def plot_nr_iv_vs_historical_by_hv_tenor(
     backtest_df: pd.DataFrame,
     horizon_col: str = "hv_tenor_days",
     save_path: str | Path | None = None,
     show: bool = True,
 ) -> None:
-    """Compare NR implied vol and historical vol over time horizons."""
+    """Compare NR implied vol and historical vol by historical-volatility tenor (hv_tenor_days)."""
     df = backtest_df.dropna(subset=["nr_implied_vol", "historical_volatility", horizon_col]).copy()
     grouped = (
         df.groupby(horizon_col, as_index=False)[["nr_implied_vol", "historical_volatility"]]
@@ -326,8 +320,8 @@ def plot_nr_iv_vs_historical_by_horizon(
         linewidth=1.8,
         label="Historical volatility (median)",
     )
-    ax.set_title("Implied vs Historical Volatility Across Time Horizons", fontsize=12)
-    ax.set_xlabel("Time Horizon (days)", fontsize=11)
+    ax.set_title("Implied vs Historical Volatility by Historical Volatility Tenor", fontsize=12)
+    ax.set_xlabel("Historical volatility tenor (days)", fontsize=11)
     ax.set_ylabel("Volatility", fontsize=11)
     ax.grid(alpha=0.25)
     ax.legend(loc="best", framealpha=0.95)
@@ -400,32 +394,26 @@ def plot_iv_error_diagnostics(
     for cp, color, label in [("C", "#1f77b4", "Calls"), ("P", "#ff7f0e", "Puts")]:
         sub = grouped[grouped["cp_flag"] == cp]
         ax.plot(sub["hv_tenor_days"], sub["abs_iv_error"], marker="o", color=color, label=label)
-    ax.set_title("Median Absolute Newton-Raphson IV Error by Time Horizon", fontsize=12)
-    ax.set_xlabel("Time Horizon (days)", fontsize=11)
+    ax.set_title("Median Absolute Newton-Raphson IV Error by Historical Volatility Tenor", fontsize=12)
+    ax.set_xlabel("Historical volatility tenor (days)", fontsize=11)
     ax.set_ylabel("Median Absolute IV Error", fontsize=11)
     ax.set_ylim(bottom=0.0)
     ax.grid(alpha=0.2)
     ax.legend(loc="best", framealpha=0.95)
-    _finalize_plot(fig, prefix.with_name(f"{prefix.name}_by_horizon.png"), show)
+    _finalize_plot(fig, prefix.with_name(f"{prefix.name}_by_hv_tenor.png"), show)
 
 
-def _compute_r2_metrics(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
-    """Return (R2, adjusted R2) for simple linear regression y ~ x."""
+def _compute_r2(x: np.ndarray, y: np.ndarray) -> float:
+    """R² for simple linear regression y ~ x (one regressor)."""
     if len(x) < 3:
-        return np.nan, np.nan
+        return np.nan
     slope, intercept = np.polyfit(x, y, deg=1)
     y_hat = intercept + slope * x
     ss_res = np.sum((y - y_hat) ** 2)
     ss_tot = np.sum((y - np.mean(y)) ** 2)
     if ss_tot <= 0:
-        return np.nan, np.nan
-    r2 = 1.0 - (ss_res / ss_tot)
-    n = len(x)
-    p = 1
-    if n <= p + 1:
-        return r2, np.nan
-    r2_adj = 1.0 - (1.0 - r2) * (n - 1.0) / (n - p - 1.0)
-    return r2, r2_adj
+        return np.nan
+    return float(1.0 - (ss_res / ss_tot))
 
 
 def plot_r2_by_volatility_range(
@@ -435,7 +423,7 @@ def plot_r2_by_volatility_range(
     save_path: str | Path | None = None,
     show: bool = True,
 ) -> None:
-    """Plot R2 and adjusted R2 by volatility range for calls and puts."""
+    """Plot R² by historical-volatility quantile bin for calls and puts (y ~ midpoint)."""
     df = backtest_df.dropna(subset=["midpoint", "bs_price_hv", "cp_flag", vol_col]).copy()
     df = df[df[vol_col] > 0]
     if len(df) == 0:
@@ -452,33 +440,27 @@ def plot_r2_by_volatility_range(
             chunk = sub[sub["vol_bin"] == interval]
             x = chunk["midpoint"].to_numpy()
             y = chunk["bs_price_hv"].to_numpy()
-            r2, r2_adj = _compute_r2_metrics(x, y)
+            r2 = _compute_r2(x, y)
             records.append(
                 {
                     "option_type": option_type,
                     "bin": interval,
                     "r2": r2,
-                    "r2_adj": r2_adj,
                 }
             )
     metrics = pd.DataFrame(records)
     x_idx = np.arange(len(bin_order))
 
-    fig, axes = plt.subplots(2, 1, figsize=(12, 9), sharex=True)
-    for ax, metric_col, title in [
-        (axes[0], "r2", "R² by Volatility Range"),
-        (axes[1], "r2_adj", "Adjusted R² by Volatility Range"),
-    ]:
-        for option_type, color in [("Calls", "#1f77b4"), ("Puts", "#ff7f0e")]:
-            s = metrics[metrics["option_type"] == option_type].sort_values("bin")
-            ax.plot(x_idx, s[metric_col], marker="o", linewidth=1.8, color=color, label=option_type)
-        ax.set_title(title, fontsize=12)
-        ax.set_ylabel(metric_col.replace("_", " ").upper(), fontsize=11)
-        ax.set_ylim(-0.1, 1.05)
-        ax.grid(alpha=0.25)
-        ax.legend(loc="best", framealpha=0.95)
-
-    axes[1].set_xticks(x_idx)
-    axes[1].set_xticklabels(bin_labels, rotation=30, ha="right")
-    axes[1].set_xlabel("Historical Volatility Range", fontsize=11)
+    fig, ax = plt.subplots(figsize=(12, 5))
+    for option_type, color in [("Calls", "#1f77b4"), ("Puts", "#ff7f0e")]:
+        s = metrics[metrics["option_type"] == option_type].sort_values("bin")
+        ax.plot(x_idx, s["r2"], marker="o", linewidth=1.8, color=color, label=option_type)
+    ax.set_title("R² by Volatility Range", fontsize=12)
+    ax.set_ylabel("R²", fontsize=11)
+    ax.set_ylim(-0.1, 1.05)
+    ax.grid(alpha=0.25)
+    ax.legend(loc="best", framealpha=0.95)
+    ax.set_xticks(x_idx)
+    ax.set_xticklabels(bin_labels, rotation=30, ha="right")
+    ax.set_xlabel("Historical Volatility Range", fontsize=11)
     _finalize_plot(fig, save_path, show)
